@@ -668,7 +668,7 @@ function App() {
       <header className="header">
         <div className="header-left">
           <img src="/bai-engineers-logo.png" alt="Bai Engineers" className="header-logo" />
-          <h1>Point Tracker</h1>
+          <h1>Bai Tracker</h1>
           {selectedProject && (
             <span className="header-project">{selectedProject.name}</span>
           )}
@@ -887,10 +887,7 @@ function App() {
               {sortedPoints.map((p) => (
                 <div key={p.id} className={selectedPointIds.has(p.id) ? "point-card point-card-selected" : "point-card"} style={{ borderLeft: `4px solid ${selectedPointIds.has(p.id) ? "#22c55e" : getCategoryColor(p.category)}` }}>
                   <div className="point-card-header">
-                    <label className="point-select-check">
-                      <input type="checkbox" checked={selectedPointIds.has(p.id)} onChange={() => togglePointSelection(p.id)} />
-                      <span>{p.pointNumber == null ? "No point #" : `Point ${p.pointNumber}`}</span>
-                    </label>
+                    <span className="point-number">{p.pointNumber == null ? "No point #" : `Point ${p.pointNumber}`}</span>
                     <span className="point-date">{p.date}</span>
                     <span className="point-time">{formatTimeDisplay(p.date, p.time ?? "", p.timezone)}</span>
                   </div>

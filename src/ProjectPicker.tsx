@@ -128,7 +128,7 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
       <header className="header">
         <div className="header-left">
           <img src="/bai-engineers-logo.png" alt="Bai Engineers" className="header-logo" />
-          <h1>Point Tracker</h1>
+          <h1>Bai Tracker</h1>
         </div>
         <div className="header-user">
           <span className="header-email">{userEmail}</span>

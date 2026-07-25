@@ -75,11 +75,8 @@ function SelectAreaButton({ active, onToggle }: { active: boolean; onToggle: () 
         aria-label="Select points by area"
         aria-pressed={active}
       >
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke={active ? "#fff" : "#1a73e8"} strokeWidth="2" strokeLinecap="square" xmlns="http://www.w3.org/2000/svg">
-          <path d="M4 8V5a1 1 0 0 1 1-1h3" />
-          <path d="M16 4h3a1 1 0 0 1 1 1v3" />
-          <path d="M20 16v3a1 1 0 0 1-1 1h-3" />
-          <path d="M8 20H5a1 1 0 0 1-1-1v-3" />
+        <svg width="30" height="30" viewBox="0 0 24 24" fill={active ? "#fff" : "#1a73e8"} xmlns="http://www.w3.org/2000/svg">
+          <rect x="5" y="5" width="14" height="14" rx="2" />
         </svg>
       </button>
     </MapControl>
@@ -89,7 +86,7 @@ function SelectAreaButton({ active, onToggle }: { active: boolean; onToggle: () 
 const BENT_NM = { lat: 33.1581, lng: -105.8572 };
 const DEFAULT_ZOOM = 14;
 /** Default geographic radius (meters) for circle markers when none is supplied. */
-const DEFAULT_RADIUS_M = 8;
+const DEFAULT_RADIUS_M = 1;
 
 export interface PointMarker {
   id: string;
