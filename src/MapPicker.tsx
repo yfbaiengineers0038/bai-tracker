@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from "react";
 import {
   APIProvider,
   Map,
@@ -24,6 +24,44 @@ function MapFocuser({ target }: { target: FocusTarget | null }) {
     map.panTo({ lat: target.lat, lng: target.lng });
     map.setZoom(20);
   }, [map, target]);
+  return null;
+}
+
+/**
+ * Auto-fits the map to the project's points once per load. With zero points it
+ * does nothing (the map keeps the project's configured center/zoom); with one
+ * point it centers at a fixed zoom (fitBounds of a single point zooms in far
+ * too deep); with two or more it calls fitBounds with padding.
+ *
+ * The effect is keyed on a stable string of the point ids, so it runs once when
+ * the points arrive and does NOT fight the user's manual pan/zoom afterwards.
+ * Switching projects unmounts/remounts MapPicker, so it naturally re-fits.
+ */
+const SINGLE_POINT_ZOOM = 18;
+const FIT_BOUNDS_PADDING = 60; // px of breathing room around the markers
+
+function MapBoundsFitter({ points }: { points: PointMarker[] }) {
+  const map = useMap();
+  // Stable identity of which points are present — re-fits only when the set changes.
+  const pointsKey = points.map((p) => p.id).join(",");
+  useEffect(() => {
+    if (!map || points.length === 0) return;
+    if (points.length === 1) {
+      map.panTo({ lat: points[0].lat, lng: points[0].lng });
+      map.setZoom(SINGLE_POINT_ZOOM);
+      return;
+    }
+    const lats = points.map((p) => p.lat);
+    const lngs = points.map((p) => p.lng);
+    const bounds: google.maps.LatLngBoundsLiteral = {
+      north: Math.max(...lats),
+      south: Math.min(...lats),
+      east: Math.max(...lngs),
+      west: Math.min(...lngs),
+    };
+    map.fitBounds(bounds, FIT_BOUNDS_PADDING);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, pointsKey]);
   return null;
 }
 
@@ -83,8 +121,31 @@ function SelectAreaButton({ active, onToggle }: { active: boolean; onToggle: () 
   );
 }
 
+/** Toggles point name labels on/off. Mirrors the LocateButton/SelectAreaButton control style. */
+function ToggleLabelsButton({ active, onToggle }: { active: boolean; onToggle: () => void }) {
+  return (
+    <MapControl position={ControlPosition.RIGHT_TOP}>
+      <button
+        className={active ? "map-select-btn active" : "map-select-btn"}
+        onClick={onToggle}
+        title={active ? "Hide point labels" : "Show point labels"}
+        aria-label="Toggle point labels"
+        aria-pressed={active}
+      >
+        {/* Tag/label icon — filled when labels are on. */}
+        <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? "#fff" : "#1a73e8"} xmlns="http://www.w3.org/2000/svg">
+          <path d="M20.59 13.41 13.42 20.6a2 2 0 0 1-2.83 0L3 13V3h10l7.59 7.59a2 2 0 0 1 0 2.82Z" />
+          <circle cx="7.5" cy="7.5" r="1.5" fill="#fff" />
+        </svg>
+      </button>
+    </MapControl>
+  );
+}
+
 const BENT_NM = { lat: 33.1581, lng: -105.8572 };
 const DEFAULT_ZOOM = 14;
+/** Points' name labels appear only when the map is zoomed in at least this far. */
+const LABEL_MIN_ZOOM = 17;
 /** Default geographic radius (meters) for circle markers when none is supplied. */
 const DEFAULT_RADIUS_M = 1;
 
@@ -182,6 +243,105 @@ function CircleMarker({
     clickRef.current = c.addListener("click", onClick);
     return () => { clickRef.current?.remove(); clickRef.current = null; };
   }, [onClick]);
+
+  return null;
+}
+
+/**
+ * A small name label drawn above a point marker that moves in perfect lockstep
+ * with the circle markers — no drift, no hide/show flicker — by repositioning
+ * itself on every animation frame while the map is moving.
+ *
+ * Why this is needed: a DOM overlay's `draw()` only fires once a gesture
+ * settles, so a plain OverlayView label slides relative to the map mid-zoom
+ * (the circles don't, because they're vector-rendered every frame). To match,
+ * we run a requestAnimationFrame loop for the duration of each gesture that
+ * reads the live projection and sets left/top every frame.
+ *
+ * The label node lives in the map's overlay layer (via a tiny OverlayView that
+ * only handles add/remove), and is positioned in container-pixel space so it
+ * tracks the marker exactly. React returns null; the overlay owns the node.
+ */
+function PointLabel({
+  position,
+  name,
+}: {
+  position: google.maps.LatLngLiteral;
+  name: string;
+}) {
+  const map = useMap();
+
+  useEffect(() => {
+    if (!map) return;
+
+    // The overlay's only job is to mount/unmount the label node into the map's
+    // overlay pane. Positioning is done per-frame below, not in draw().
+    const div = document.createElement("div");
+    div.className = "map-point-label";
+    div.textContent = name;
+
+    // Cache the LatLng so we don't reallocate it every frame.
+    const latLng = new google.maps.LatLng(position.lat, position.lng);
+
+    // Reposition the label for the current map view. Called every frame while
+    // moving and once on settle. Uses divPixel because the node lives in the
+    // floatPane, whose origin matches fromLatLngToDivPixel's coordinate space.
+    const place = () => {
+      const projection = overlay.getProjection();
+      if (!projection) return;
+      const point = projection.fromLatLngToDivPixel(latLng);
+      if (!point) return;
+      div.style.left = `${point.x}px`;
+      div.style.top = `${point.y}px`;
+    };
+
+    class LabelOverlay extends google.maps.OverlayView {
+      onAdd() {
+        // floatPane is in container-pixel space, matching fromLatLngToContainerPixel.
+        this.getPanes()?.floatPane.appendChild(div);
+      }
+      onRemove() {
+        div.parentNode?.removeChild(div);
+      }
+      draw() {
+        place();
+      }
+    }
+
+    const overlay = new LabelOverlay();
+    overlay.setMap(map);
+
+    // rAF loop: runs while the map is moving, repositioning every frame so the
+    // label glides in sync with the vector circle instead of drifting.
+    let raf = 0;
+    let moving = false;
+    const tick = () => {
+      place();
+      if (moving) raf = requestAnimationFrame(tick);
+    };
+    const onMove = () => {
+      if (!moving) {
+        moving = true;
+        raf = requestAnimationFrame(tick);
+      }
+    };
+    const onIdle = () => {
+      moving = false;
+      if (raf) { cancelAnimationFrame(raf); raf = 0; }
+      place(); // final precise placement
+    };
+
+    const moveListener = map.addListener("bounds_changed", onMove);
+    const idleListener = map.addListener("idle", onIdle);
+    place(); // initial placement
+
+    return () => {
+      google.maps.event.removeListener(moveListener);
+      google.maps.event.removeListener(idleListener);
+      if (raf) cancelAnimationFrame(raf);
+      overlay.setMap(null);
+    };
+  }, [map, position.lat, position.lng, name]);
 
   return null;
 }
@@ -424,6 +584,11 @@ export default function MapPicker({
 
   const [geoMarker, setGeoMarker] = useState<{ position: google.maps.LatLngLiteral; accuracy: number } | null>(null);
 
+  /** Live zoom level — used to show/hide point name labels when zoomed in. */
+  const [currentZoom, setCurrentZoom] = useState(initialZoom);
+  /** Whether point name labels are shown when zoomed in. Toggleable via the map control. */
+  const [labelsVisible, setLabelsVisible] = useState(true);
+
   const [marker, setMarker] = useState<google.maps.LatLngLiteral | null>(
     hasExisting ? { lat: parseFloat(lat), lng: parseFloat(lng) } : null
   );
@@ -488,9 +653,12 @@ export default function MapPicker({
           gestureHandling="greedy"
           disableDefaultUI={false}
           onClick={handleMapClick}
+          onZoomChanged={(ev) => setCurrentZoom(ev.detail.zoom)}
         >
           <MapFocuser target={focusTarget ?? null} />
+          <MapBoundsFitter points={points} />
           <LocateButton onLocate={(pos, accuracy) => setGeoMarker({ position: pos, accuracy })} />
+          <ToggleLabelsButton active={labelsVisible} onToggle={() => setLabelsVisible((v) => !v)} />
           {onToggleSelectionMode && (
             <SelectAreaButton active={selectionMode} onToggle={onToggleSelectionMode} />
           )}
@@ -515,16 +683,20 @@ export default function MapPicker({
           )}
 
           {points.map((p) => (
-            <CircleMarker
-              key={p.id}
-              center={{ lat: p.lat, lng: p.lng }}
-              radius={p.radius ?? DEFAULT_RADIUS_M}
-              fillColor={selectedPointIds.has(p.id) ? "#22c55e" : (p.color ?? "#e11d48")}
-              strokeColor={selectedPointIds.has(p.id) ? "#14532d" : (p.color ?? "#b91c1c")}
-              fillOpacity={selectedPointIds.has(p.id) ? 0.8 : 0.5}
-              strokeWeight={selectedPointIds.has(p.id) ? 4 : 2}
-              onClick={() => selectionMode ? onPointToggle?.(p.id) : onPointSelect?.(p.id)}
-            />
+            <Fragment key={p.id}>
+              <CircleMarker
+                center={{ lat: p.lat, lng: p.lng }}
+                radius={p.radius ?? DEFAULT_RADIUS_M}
+                fillColor={selectedPointIds.has(p.id) ? "#22c55e" : (p.color ?? "#e11d48")}
+                strokeColor={selectedPointIds.has(p.id) ? "#14532d" : (p.color ?? "#b91c1c")}
+                fillOpacity={selectedPointIds.has(p.id) ? 0.8 : 0.5}
+                strokeWeight={selectedPointIds.has(p.id) ? 4 : 2}
+                onClick={() => selectionMode ? onPointToggle?.(p.id) : onPointSelect?.(p.id)}
+              />
+              {labelsVisible && currentZoom >= LABEL_MIN_ZOOM && p.location && (
+                <PointLabel position={{ lat: p.lat, lng: p.lng }} name={p.location} />
+              )}
+            </Fragment>
           ))}
 
           {draftVisible && (

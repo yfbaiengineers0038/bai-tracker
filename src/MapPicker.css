@@ -27,6 +27,28 @@
   font-size: 0.85rem;
 }
 
+/* ── Point name label (a native OverlayView drawn above the marker) ── */
+.map-point-label {
+  position: absolute;
+  /* The overlay sets left/top to the marker's pixel coordinate; anchor the
+     box's bottom-center there and lift it above the circle dot. */
+  transform: translate(-50%, calc(-100% - 12px));
+  background: rgba(255, 255, 255, 0.92);
+  color: #111827;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 11px;
+  line-height: 1.4;
+  font-weight: 600;
+  white-space: nowrap;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 0, 0, 0.1);
+  pointer-events: none;
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 
 /* ── Locate button ── */
 .map-locate-btn {
