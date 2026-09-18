@@ -10,7 +10,7 @@ import {
   supportsDirectoryPicker,
   type ExportMediaProgress,
 } from "./exportMedia";
-import { coordinateOptionsForLocation, unitsLabel } from "./survey";
+import { coordinateOptionsForLocation, groupCoordinateOptions, unitsLabel } from "./survey";
 import "./SurveyModals.css";
 
 export function CoordinateSettingsModal({
@@ -74,10 +74,14 @@ export function CoordinateSettingsModal({
         <label>
           Coordinate system
           <select value={epsg} onChange={(event) => { setEpsg(event.target.value); setConfirmed(false); }}>
-            {options.map((option) => (
-              <option key={option.epsg} value={option.epsg}>
-                {option.recommended ? "Recommended — " : ""}{option.name} (EPSG:{option.epsg})
-              </option>
+            {groupCoordinateOptions(options).map((group) => (
+              <optgroup key={group.group} label={group.group}>
+                {group.options.map((option) => (
+                  <option key={option.epsg} value={option.epsg}>
+                    {option.recommended ? "Recommended — " : ""}{option.name} (EPSG:{option.epsg})
+                  </option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </label>
@@ -85,6 +89,9 @@ export function CoordinateSettingsModal({
           <span>EPSG:{selected?.epsg}</span>
           <span>{unitsLabel(selected?.units)}</span>
         </div>
+        {selected?.civil3dName && (
+          <p className="survey-civil3d-name">Civil 3D: <code>{selected.civil3dName}</code></p>
+        )}
         <label>
           Vertical datum (optional)
           <input value={verticalDatum} onChange={(event) => setVerticalDatum(event.target.value)} placeholder="e.g. NAVD88" />
@@ -93,6 +100,7 @@ export function CoordinateSettingsModal({
           Elevation units
           <select value={elevationUnits} onChange={(event) => setElevationUnits(event.target.value)}>
             <option value="us-ft">US survey feet</option>
+            <option value="ft">International feet</option>
             <option value="m">Meters</option>
           </select>
         </label>

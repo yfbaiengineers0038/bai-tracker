@@ -6,6 +6,7 @@ import { uploadData, getUrl, remove } from "aws-amplify/storage";
 import type { Schema } from "../amplify/data/resource";
 import MapPicker from "./MapPicker";
 import type { PointMarker, FocusTarget } from "./MapPicker";
+import PlaceAutocompleteInput from "./PlaceAutocompleteInput";
 import ProjectPicker from "./ProjectPicker";
 import type { ProjectSummary, Role } from "./ProjectPicker";
 import { CoordinateSettingsModal, ExportPointsModal } from "./SurveyModals";
@@ -158,6 +159,13 @@ function App() {
   function handleCreateCoordChange(lat: string, lng: string) {
     setCreateLat(lat);
     setCreateLng(lng);
+  }
+
+  /** A place picked from the Location suggestions: drop the marker there and pan the mini-map to it. */
+  function handleCreatePlaceSelect(place: { lat: number; lng: number }) {
+    setCreateLat(place.lat.toFixed(6));
+    setCreateLng(place.lng.toFixed(6));
+    setCreateFocus({ lat: place.lat, lng: place.lng, nonce: Date.now() });
   }
 
   function handleCreateFilesPicked(e: React.ChangeEvent<HTMLInputElement>) {
@@ -980,13 +988,15 @@ function App() {
 
               <label>
                 Location
-                <input
+                <PlaceAutocompleteInput
                   name="location"
-                  type="text"
                   placeholder="e.g. Central Park, NYC"
                   value={createForm.location}
-                  onChange={handleCreateChange}
                   required
+                  disabled={createBusy}
+                  biasCenter={selectedProject ? { lat: selectedProject.lat, lng: selectedProject.lng } : null}
+                  onChange={(text) => setCreateForm((prev) => ({ ...prev, location: text }))}
+                  onPlaceSelect={handleCreatePlaceSelect}
                 />
               </label>
 
@@ -1070,6 +1080,14 @@ function App() {
                 disabled={createBusy}
               >
                 Photo/Video
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                onClick={closeCreate}
+                disabled={createBusy}
+              >
+                Cancel
               </button>
               <button
                 type="button"

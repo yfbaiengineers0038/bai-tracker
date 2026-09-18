@@ -175,3 +175,14 @@
   .export-modal.attr-window { max-width: 100%; }
   .survey-export-facts div { grid-template-columns: 1fr; gap: 0.1rem; }
 }
+
+.survey-civil3d-name {
+  margin: -0.25rem 0 0;
+  font-size: 0.8rem;
+  color: #6b7280;
+  overflow-wrap: anywhere;
+}
+
+.survey-civil3d-name code {
+  font-size: 0.75rem;
+}

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
 import MapPicker from "./MapPicker";
-import { coordinateOptionsForLocation, unitsLabel } from "./survey";
+import { coordinateOptionsForLocation, groupCoordinateOptions, unitsLabel } from "./survey";
 import "./ProjectPicker.css";
 
 const client = generateClient<Schema>();
@@ -214,10 +214,14 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
                     value={createEpsg}
                     onChange={(e) => { setCreateEpsg(e.target.value); setCreateCoordinateConfirmed(false); }}
                   >
-                    {createCoordinateOptions.map((option) => (
-                      <option key={option.epsg} value={option.epsg}>
-                        {option.recommended ? "Recommended — " : ""}{option.name} (EPSG:{option.epsg})
-                      </option>
+                    {groupCoordinateOptions(createCoordinateOptions).map((group) => (
+                      <optgroup key={group.group} label={group.group}>
+                        {group.options.map((option) => (
+                          <option key={option.epsg} value={option.epsg}>
+                            {option.recommended ? "Recommended — " : ""}{option.name} (EPSG:{option.epsg})
+                          </option>
+                        ))}
+                      </optgroup>
                     ))}
                   </select>
                 </label>
@@ -237,6 +241,7 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
                   Elevation units
                   <select value={createElevationUnits} onChange={(e) => setCreateElevationUnits(e.target.value)}>
                     <option value="us-ft">US survey feet</option>
+                    <option value="ft">International feet</option>
                     <option value="m">Meters</option>
                   </select>
                 </label>

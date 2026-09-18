@@ -594,6 +594,19 @@ export default function MapPicker({
   );
   const [selectionBounds, setSelectionBounds] = useState<google.maps.LatLngBoundsLiteral | null>(null);
 
+  // Keep the draft marker in sync when the parent sets coordinates by other
+  // means (place search, "Use My Location") or clears them.
+  useEffect(() => {
+    if (lat === "" || lng === "") {
+      setMarker(null);
+      return;
+    }
+    const nextLat = parseFloat(lat);
+    const nextLng = parseFloat(lng);
+    if (isNaN(nextLat) || isNaN(nextLng)) return;
+    setMarker((prev) => (prev && prev.lat === nextLat && prev.lng === nextLng ? prev : { lat: nextLat, lng: nextLng }));
+  }, [lat, lng]);
+
   useEffect(() => {
     if (!selectionMode) setSelectionBounds(null);
   }, [selectionMode]);
