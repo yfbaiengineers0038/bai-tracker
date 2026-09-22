@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "sandbox": "npx ampx sandbox"
+    "sandbox": "npx ampx sandbox",
+    "backup": "tsx scripts/backup.ts"
   },
   "dependencies": {
     "@aws-amplify/ui-react": "^6.15.4",

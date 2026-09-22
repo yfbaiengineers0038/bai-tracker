@@ -19,3 +19,6 @@ amplify_outputs.json
 # OS
 .DS_Store
 Thumbs.db
+
+# Local data backups (never commit project data)
+backup/
