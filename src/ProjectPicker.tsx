@@ -274,6 +274,12 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
                 className="btn btn-primary"
                 onClick={handleCreateSubmit}
                 disabled={createBusy || !createName.trim() || !createLat || !createLng || !createCoordinateConfirmed}
+                title={
+                  !createName.trim() ? "Enter a project name"
+                    : !createLat || !createLng ? "Set the project's center on the map"
+                    : !createCoordinateConfirmed ? "Confirm the coordinate system first"
+                    : "Create the project"
+                }
               >
                 {createBusy ? "Creating…" : "Create project"}
               </button>

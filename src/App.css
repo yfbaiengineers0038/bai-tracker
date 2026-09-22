@@ -69,6 +69,20 @@
   transition: background 0.2s, transform 0.1s;
 }
 
+/* Disabled buttons must look disabled — otherwise a blocked action (e.g. the
+   unticked coordinate-system confirmation) reads as a broken button. */
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(0.3);
+}
+
+.btn:disabled:active,
+.btn[disabled]:active {
+  transform: none;
+}
+
 .btn:active {
   transform: scale(0.97);
 }
