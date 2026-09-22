@@ -2,7 +2,9 @@ import { useEffect, useMemo, useState } from "react";
 import { generateClient } from "aws-amplify/data";
 import type { Schema } from "../amplify/data/resource";
 import MapPicker from "./MapPicker";
+import type { FocusTarget } from "./MapPicker";
 import { coordinateOptionsForLocation, groupCoordinateOptions, unitsLabel } from "./survey";
+import PlaceAutocompleteInput from "./PlaceAutocompleteInput";
 import "./ProjectPicker.css";
 
 const client = generateClient<Schema>();
@@ -45,6 +47,7 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
   const [createLng, setCreateLng] = useState("");
   const [createEpsg, setCreateEpsg] = useState("");
   const [createCoordinateConfirmed, setCreateCoordinateConfirmed] = useState(false);
+  const [createFocus, setCreateFocus] = useState<FocusTarget | null>(null);
   const [createVerticalDatum, setCreateVerticalDatum] = useState("");
   const [createElevationUnits, setCreateElevationUnits] = useState("us-ft");
   const [createBusy, setCreateBusy] = useState(false);
@@ -113,6 +116,7 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
       setCreateEpsg("");
       setCreateCoordinateConfirmed(false);
       setCreateVerticalDatum("");
+      setCreateFocus(null);
       await fetchProjects();
     } finally {
       setCreateBusy(false);
@@ -184,12 +188,18 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
             <h3>New project</h3>
             <label>
               Name
-              <input
-                type="text"
+              <PlaceAutocompleteInput
                 value={createName}
-                onChange={(e) => setCreateName(e.target.value)}
+                onChange={setCreateName}
                 placeholder="e.g. Bent, NM"
-                autoFocus
+                onPlaceSelect={(place) => {
+                  // Picking a place names the project and centers it there, so
+                  // clicking the map below becomes optional. Route through the
+                  // map-click handler so the recommended coordinate system is
+                  // set for the new location too.
+                  handleCreateCoordChange(place.lat.toFixed(6), place.lng.toFixed(6));
+                  setCreateFocus({ lat: place.lat, lng: place.lng, nonce: Date.now() });
+                }}
               />
             </label>
             <div className="mini-map-wrap">
@@ -199,6 +209,7 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
                 points={[]}
                 onCoordChange={handleCreateCoordChange}
                 onMarkerCancel={() => { setCreateLat(""); setCreateLng(""); }}
+                focusTarget={createFocus}
               />
             </div>
             <p className="project-create-hint">
