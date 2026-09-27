@@ -5,11 +5,10 @@ import MapPicker from "./MapPicker";
 import type { FocusTarget } from "./MapPicker";
 import { coordinateOptionsForLocation, groupCoordinateOptions, unitsLabel } from "./survey";
 import PlaceAutocompleteInput from "./PlaceAutocompleteInput";
+import { canAccess, type UserAccess } from "./userAccess";
 import "./ProjectPicker.css";
 
 const client = generateClient<Schema>();
-
-export type Role = "master" | "worker" | "field_worker";
 
 export interface ProjectSummary {
   id: string;
@@ -23,12 +22,12 @@ export interface ProjectSummary {
   coordinateSystemConfirmed: boolean;
   verticalDatum: string | null;
   elevationUnits: string | null;
+  /** Cognito group allowed to see this project; null means admin-only. */
+  accessGroup: string | null;
 }
 
 interface ProjectPickerProps {
-  role: Role;
-  /** Comma-separated project IDs the user may access (from the Cognito token). Empty for masters. */
-  allowedProjectIds: string[];
+  access: UserAccess;
   userEmail: string;
   onSignOut: () => void;
   onChoose: (project: ProjectSummary) => void;
@@ -36,13 +35,14 @@ interface ProjectPickerProps {
 
 const DEFAULT_PROJECT_ZOOM = 14;
 
-export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSignOut, onChoose }: ProjectPickerProps) {
+export default function ProjectPicker({ access, userEmail, onSignOut, onChoose }: ProjectPickerProps) {
   const [projects, setProjects] = useState<Schema["Project"]["type"][]>([]);
   const [loading, setLoading] = useState(true);
 
-  // ── Create-project modal (masters only) ──
+  // ── Create-project modal (admins only) ──
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
+  const [createAccessGroup, setCreateAccessGroup] = useState("");
   const [createLat, setCreateLat] = useState("");
   const [createLng, setCreateLng] = useState("");
   const [createEpsg, setCreateEpsg] = useState("");
@@ -63,7 +63,14 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
     fetchProjects();
   }, []);
 
-  /** Role-aware filtering: masters see everything; workers/field workers see only granted IDs. */
+  /**
+   * Admins see everything; everyone else sees the projects whose `accessGroup`
+   * they belong to.
+   *
+   * AppSync has already filtered the list server-side, so this is belt-and-
+   * braces rather than the control — it keeps the UI honest if a stale record
+   * ever arrives from cache.
+   */
   const visibleProjects = useMemo<ProjectSummary[]>(() => {
     const mapped = projects.map((p) => ({
       id: p.id,
@@ -77,10 +84,10 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
       coordinateSystemConfirmed: p.coordinateSystemConfirmed ?? false,
       verticalDatum: p.verticalDatum ?? null,
       elevationUnits: p.elevationUnits ?? null,
+      accessGroup: p.accessGroup ?? null,
     }));
-    if (role === "master") return mapped;
-    return mapped.filter((p) => allowedProjectIds.includes(p.id));
-  }, [projects, role, allowedProjectIds]);
+    return mapped.filter((p) => canAccess(access, p.accessGroup));
+  }, [projects, access]);
 
   function handleCreateCoordChange(lat: string, lng: string) {
     setCreateLat(lat);
@@ -108,9 +115,13 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
         coordinateSystemConfirmed: true,
         verticalDatum: createVerticalDatum.trim() || undefined,
         elevationUnits: createElevationUnits,
+        // Who may see this project. Left blank it stays admin-only, which is
+        // the safe default — assign it when the client's group exists.
+        accessGroup: createAccessGroup.trim() || undefined,
       });
       setCreateOpen(false);
       setCreateName("");
+      setCreateAccessGroup("");
       setCreateLat("");
       setCreateLng("");
       setCreateEpsg("");
@@ -145,7 +156,7 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
       <main className="project-picker-main">
         <div className="project-picker-head">
           <h2>Choose a project</h2>
-          {role === "master" && (
+          {access.isAdmin && (
             <button className="btn btn-primary btn-small" onClick={() => setCreateOpen(true)}>
               + New project
             </button>
@@ -157,7 +168,7 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
         ) : visibleProjects.length === 0 ? (
           <p className="project-picker-empty">
             No projects assigned to you yet.
-            {role !== "master" && " Ask an administrator to grant you access to a project."}
+            {!access.isAdmin && " Ask an administrator to grant you access to a project."}
           </p>
         ) : (
           <div className="project-grid">
@@ -202,6 +213,23 @@ export default function ProjectPicker({ role, allowedProjectIds, userEmail, onSi
                 }}
               />
             </label>
+            <label>
+              Access group
+              <input
+                type="text"
+                value={createAccessGroup}
+                onChange={(e) => setCreateAccessGroup(e.target.value)}
+                placeholder="e.g. riverside-survey — blank = Bai staff only"
+                autoCapitalize="none"
+                autoCorrect="off"
+                spellCheck={false}
+              />
+            </label>
+            <p className="project-create-hint">
+              Members of this Cognito group see this project and its points.
+              Create the group in the Cognito console and add the client's
+              users to it. The name must match exactly.
+            </p>
             <div className="mini-map-wrap">
               <MapPicker
                 lat={createLat}

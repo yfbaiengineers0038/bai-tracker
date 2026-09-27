@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { useAuthenticator } from "@aws-amplify/ui-react";
-import { fetchAuthSession } from "aws-amplify/auth";
 import { generateClient } from "aws-amplify/data";
 import { uploadData, getUrl, remove } from "aws-amplify/storage";
 import type { Schema } from "../amplify/data/resource";
@@ -8,7 +7,8 @@ import MapPicker from "./MapPicker";
 import type { PointMarker, FocusTarget } from "./MapPicker";
 import PlaceAutocompleteInput from "./PlaceAutocompleteInput";
 import ProjectPicker from "./ProjectPicker";
-import type { ProjectSummary, Role } from "./ProjectPicker";
+import type { ProjectSummary } from "./ProjectPicker";
+import { loadUserAccess, NO_ACCESS, type UserAccess } from "./userAccess";
 import { CoordinateSettingsModal, ExportPointsModal } from "./SurveyModals";
 import "./App.css";
 
@@ -94,25 +94,21 @@ const emptyDetail: DetailFormData = {
 function App() {
   const { user, signOut } = useAuthenticator((context) => [context.user]);
 
-  // ── Role + project grants (from Cognito token custom attributes) ──
-  // Set per-user in AWS Console: custom:role ("master"|"worker"|"field_worker")
-  // and custom:projects (comma-separated project IDs; empty for master).
-  const [role, setRole] = useState<Role>("field_worker");
-  const [allowedProjectIds, setAllowedProjectIds] = useState<string[]>([]);
+  // ── Access (from the Cognito groups in the sign-in token) ──
+  // `admins` sees every project; everyone else sees the projects whose
+  // `accessGroup` names a group they belong to. AppSync enforces this — what's
+  // here only decides which controls the UI offers.
+  const [access, setAccess] = useState<UserAccess>(NO_ACCESS);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        await fetchAuthSession();
-
-        if (cancelled) return;
-        // TEMP: role check disabled — everyone gets master access
-        setRole("master");
-        setAllowedProjectIds([]);
+        const loaded = await loadUserAccess();
+        if (!cancelled) setAccess(loaded);
       } catch {
-        // If the session can't be read, default to most-restrictive role.
-        if (!cancelled) setRole("field_worker");
+        // Unreadable session → assume no access rather than over-granting.
+        if (!cancelled) setAccess(NO_ACCESS);
       }
     })();
     return () => { cancelled = true; };
@@ -243,6 +239,10 @@ function App() {
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         photos: [],
         projectId: selectedProject?.id ?? undefined,
+        // Scope the point to the same group as its project. The backend checks
+        // this against the caller's groups on create, so it decides who can see
+        // the point — and a member can only ever write a group they belong to.
+        accessGroup: selectedProject?.accessGroup ?? undefined,
       });
 
       if (newPoint && createFiles.length > 0) {
@@ -658,12 +658,11 @@ function App() {
   const noopCoordChange = useCallback(() => {}, []);
 
   // ── Project selection gate ──
-  // Until a project is chosen, show the role-aware project picker instead of the map.
+  // Until a project is chosen, show the access-aware project picker instead of the map.
   if (!selectedProject) {
     return (
       <ProjectPicker
-        role={role}
-        allowedProjectIds={allowedProjectIds}
+        access={access}
         userEmail={user?.signInDetails?.loginId ?? ""}
         onSignOut={signOut}
         onChoose={setSelectedProject}
@@ -685,7 +684,7 @@ function App() {
           <button className="btn btn-secondary btn-small" onClick={() => setSelectedProject(null)}>
             Switch project
           </button>
-          {role === "master" && (
+          {access.isAdmin && (
             <button className="btn btn-secondary btn-small" onClick={() => setCoordinateSettingsOpen(true)}>
               Coordinate settings
             </button>
@@ -763,7 +762,7 @@ function App() {
           {!selectedProject.coordinateSystemConfirmed && (
             <div className="coordinate-warning">
               <span>Export requires a confirmed project coordinate system.</span>
-              {role === "master" && (
+              {access.isAdmin && (
                 <button className="btn btn-secondary btn-small" onClick={() => setCoordinateSettingsOpen(true)}>
                   Configure now
                 </button>
