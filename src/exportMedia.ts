@@ -7,6 +7,7 @@ import {
   type ExportPoint,
   type ExportProject,
 } from "./exportPoints";
+import { buildGeoJson, buildPointLayouts, buildShapefile, type PointLayout } from "./exportGis";
 
 /* ── File System Access API (typed inline to match App.tsx's existing style) ──
    No ambient @types dependency is added; the minimal shapes we use are
@@ -62,14 +63,6 @@ export function filenameFromKey(key: string): string {
   return last.replace(/^\d+-(\d+-)?/, "");
 }
 
-/** A stable, human-readable per-point folder name: `001 - Central Valve`. */
-export function folderNameForPoint(point: ExportPoint): string {
-  const num = point.pointNumber ?? 0;
-  const padded = String(num).padStart(3, "0");
-  const label = point.location?.trim() || (point.pointNumber != null ? `Point ${point.pointNumber}` : "Point");
-  return safeFilename(`${padded} - ${label}`, `Point ${num}`);
-}
-
 /** Top-level export folder name: `2026-07-23 1430 - Bent NM`. */
 export function exportFolderName(project: ExportProject, when = new Date()): string {
   const stamp = formatStamp(when);
@@ -82,29 +75,6 @@ function formatStamp(date: Date): string {
     `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ` +
     `${pad(date.getHours())}${pad(date.getMinutes())}`
   );
-}
-
-/**
- * De-duplicate filenames within a single point folder by appending `-2`,
- * `-3`, etc. before the extension when names collide. Defensive: S3 keys embed
- * timestamps so this should rarely trigger, but original filenames can repeat.
- */
-export function dedupeFilenames(names: string[]): string[] {
-  const counts = new Map<string, number>();
-  const result: string[] = [];
-  for (const name of names) {
-    const used = counts.get(name) ?? 0;
-    counts.set(name, used + 1);
-    if (used === 0) {
-      result.push(name);
-    } else {
-      const dot = name.lastIndexOf(".");
-      const base = dot === -1 ? name : name.slice(0, dot);
-      const ext = dot === -1 ? "" : name.slice(dot);
-      result.push(`${base}-${used + 1}${ext}`);
-    }
-  }
-  return result;
 }
 
 /* ── Byte fetching ── */
@@ -144,13 +114,74 @@ function checkAbort(signal: AbortSignal) {
   if (signal.aborted) throw new ExportCanceledError();
 }
 
+/* ── Data files (CSV / shapefile / GeoJSON) ── */
+
+export interface ExportFormats {
+  csv: boolean;
+  shapefile: boolean;
+  geojson: boolean;
+}
+
+export interface RootFile {
+  name: string;
+  data: Blob;
+}
+
+/**
+ * Build the per-point layout and every data file chosen in `formats`, named
+ * `<baseName>.csv`, `<baseName>.shp/.shx/.dbf/.prj/.cpg`, `<baseName>.geojson`.
+ * `includeMedia` only decides whether the GeoJSON lists the photo paths.
+ */
+export function buildExportFiles(
+  project: ExportProject,
+  points: ExportPoint[],
+  { formats, baseName, includeMedia }: { formats: ExportFormats; baseName: string; includeMedia: boolean },
+): { layouts: PointLayout[]; rootFiles: RootFile[] } {
+  if (!project.coordinateSystemEpsg) throw new Error("The project coordinate system is not configured.");
+  if (points.length === 0) throw new Error("Select at least one point.");
+
+  const base = safeFilename(baseName, "points");
+  const layouts = buildPointLayouts(points);
+  const rootFiles: RootFile[] = [];
+  if (formats.csv) {
+    rootFiles.push({ name: `${base}.csv`, data: new Blob([buildCsvText(project, points)], { type: "text/csv;charset=utf-8" }) });
+  }
+  if (formats.shapefile) {
+    const shape = buildShapefile(project, layouts);
+    for (const ext of ["shp", "shx", "dbf", "prj", "cpg"] as const) {
+      rootFiles.push({ name: `${base}.${ext}`, data: shape[ext] });
+    }
+  }
+  if (formats.geojson) {
+    const json = buildGeoJson(project, layouts, { includeMedia, name: base });
+    rootFiles.push({ name: `${base}.geojson`, data: new Blob([json], { type: "application/geo+json" }) });
+  }
+  return { layouts, rootFiles };
+}
+
+/**
+ * Data files only, no media. A lone CSV or GeoJSON downloads as-is; more than
+ * one file (a shapefile alone is five) is bundled into `<baseName>.zip`.
+ */
+export async function downloadExportFiles(rootFiles: RootFile[], baseName: string): Promise<void> {
+  if (rootFiles.length === 1) {
+    downloadBlob(rootFiles[0].data, rootFiles[0].name);
+    return;
+  }
+  const zip = new JSZip();
+  for (const file of rootFiles) zip.file(file.name, file.data);
+  const blob = await zip.generateAsync({ type: "blob", compression: "DEFLATE" });
+  downloadBlob(blob, `${safeFilename(baseName, "points")}.zip`);
+}
+
 /* ── Export paths ── */
 
 interface ExportMediaArgs {
   project: ExportProject;
-  points: ExportPoint[];
-  /** CSV text to write alongside the media (built by the caller via buildCsvText). */
-  csvText: string;
+  /** Point folders and media file names, from buildExportFiles. */
+  layouts: PointLayout[];
+  /** Data files written at the root of the export folder. */
+  rootFiles: RootFile[];
   onProgress?: (progress: ExportMediaProgress) => void;
   signal: AbortSignal;
 }
@@ -159,12 +190,13 @@ interface ExportMediaArgs {
  * Write the folder tree into the user-picked directory via the File System
  * Access API. Streams each file to disk as it's fetched, so memory stays
  * bounded regardless of total size. Points with no media still get an empty
- * subfolder so the structure is uniform.
+ * subfolder so the structure is uniform. Media files are renamed to the
+ * GeoJSON's ImageList names (`1000_Water-Meter-1000_1.jpg`).
  */
 export async function exportToDirectory({
   project,
-  points,
-  csvText,
+  layouts,
+  rootFiles,
   onProgress,
   signal,
   rootHandle,
@@ -174,27 +206,25 @@ export async function exportToDirectory({
   const root = await rootHandle.getDirectoryHandle(topFolder, { create: true });
   checkAbort(signal);
 
-  // points.csv at the root of the export folder.
-  const csvHandle = await root.getFileHandle("points.csv", { create: true });
-  const csvWritable = await csvHandle.createWritable();
-  await csvWritable.write(new Blob([csvText], { type: "text/csv;charset=utf-8" }));
-  await csvWritable.close();
-  checkAbort(signal);
+  // CSV / shapefile / GeoJSON at the root of the export folder.
+  for (const file of rootFiles) {
+    const handle = await root.getFileHandle(file.name, { create: true });
+    const writable = await handle.createWritable();
+    await writable.write(file.data);
+    await writable.close();
+    checkAbort(signal);
+  }
 
-  const total = points.reduce((sum, p) => sum + (p.photoKeys?.length ?? 0), 0);
+  const total = layouts.reduce((sum, l) => sum + l.files.length, 0);
   let fetched = 0;
   report(onProgress, { fetched, total, current: "" });
 
-  for (const point of points) {
+  for (const layout of layouts) {
     checkAbort(signal);
-    const folder = await root.getDirectoryHandle(folderNameForPoint(point), { create: true });
-    const keys = (point.photoKeys ?? []).filter(Boolean);
-    const fileNames = dedupeFilenames(keys.map(filenameFromKey));
+    const folder = await root.getDirectoryHandle(layout.folder, { create: true });
 
-    for (let i = 0; i < keys.length; i++) {
+    for (const { key, name } of layout.files) {
       checkAbort(signal);
-      const key = keys[i];
-      const name = fileNames[i];
       report(onProgress, { fetched, total, current: name });
       const blob = await fetchBlob(key);
       const fileHandle = await folder.getFileHandle(name, { create: true });
@@ -215,29 +245,25 @@ export async function exportToDirectory({
  */
 export async function exportToZip({
   project,
-  points,
-  csvText,
+  layouts,
+  rootFiles,
   onProgress,
   signal,
 }: ExportMediaArgs): Promise<void> {
   const zip = new JSZip();
   const topFolder = exportFolderName(project);
-  zip.file(`${topFolder}/points.csv`, csvText);
+  for (const file of rootFiles) zip.file(`${topFolder}/${file.name}`, file.data);
 
-  const total = points.reduce((sum, p) => sum + (p.photoKeys?.length ?? 0), 0);
+  const total = layouts.reduce((sum, l) => sum + l.files.length, 0);
   let fetched = 0;
   report(onProgress, { fetched, total, current: "" });
 
-  for (const point of points) {
+  for (const layout of layouts) {
     checkAbort(signal);
-    const folder = folderNameForPoint(point);
-    const keys = (point.photoKeys ?? []).filter(Boolean);
-    const fileNames = dedupeFilenames(keys.map(filenameFromKey));
+    const folder = layout.folder;
 
-    for (let i = 0; i < keys.length; i++) {
+    for (const { key, name } of layout.files) {
       checkAbort(signal);
-      const key = keys[i];
-      const name = fileNames[i];
       report(onProgress, { fetched, total, current: name });
       const blob = await fetchBlob(key);
       zip.file(`${topFolder}/${folder}/${name}`, blob);

@@ -9,6 +9,7 @@ export interface ExportPoint {
   lng: number;
   pointNumber?: number | null;
   elevation?: number | null;
+  category?: string | null;
   /** S3 keys for this point's photos/videos (e.g. point-photos/<id>/<file>). */
   photoKeys?: string[];
 }

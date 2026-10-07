@@ -566,6 +566,7 @@ function App() {
           lng: point.lng,
           pointNumber: point.pointNumber ?? null,
           elevation: point.elevation ?? null,
+          category: point.category ?? null,
           photoKeys: (point.photos ?? []).filter((key): key is string => !!key),
         })),
     [points, selectedPointIds]

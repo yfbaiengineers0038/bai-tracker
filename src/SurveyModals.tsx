@@ -1,13 +1,16 @@
 import { useMemo, useRef, useState } from "react";
 import type { ProjectSummary } from "./ProjectPicker";
 import type { ExportPoint } from "./exportPoints";
-import { buildCsvText, exportSelectedPoints, safeFilename } from "./exportPoints";
+import { safeFilename } from "./exportPoints";
 import {
   ExportCanceledError,
+  buildExportFiles,
+  downloadExportFiles,
   exportToDirectory,
   exportToZip,
   pickDirectory,
   supportsDirectoryPicker,
+  type ExportFormats,
   type ExportMediaProgress,
 } from "./exportMedia";
 import { coordinateOptionsForLocation, groupCoordinateOptions, unitsLabel } from "./survey";
@@ -130,6 +133,7 @@ export function ExportPointsModal({
 }) {
   const [filename, setFilename] = useState(`${safeFilename(project.name)}-points`);
   const [includeMedia, setIncludeMedia] = useState(true);
+  const [formats, setFormats] = useState<ExportFormats>({ csv: true, shapefile: true, geojson: true });
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<ExportMediaProgress | null>(null);
   const [error, setError] = useState("");
@@ -137,16 +141,24 @@ export function ExportPointsModal({
 
   const mediaCount = points.reduce((sum, p) => sum + (p.photoKeys?.length ?? 0), 0);
   const canPickDir = supportsDirectoryPicker();
+  const anyFormat = formats.csv || formats.shapefile || formats.geojson;
+  // Only a lone CSV or GeoJSON downloads unzipped; a shapefile is always five files.
+  const singleFile = !includeMedia && !formats.shapefile && formats.csv !== formats.geojson;
+
+  function toggleFormat(key: keyof ExportFormats, value: boolean) {
+    setFormats((previous) => ({ ...previous, [key]: value }));
+  }
 
   async function runExport() {
     setBusy(true);
     setError("");
     setProgress(null);
 
-    // CSV-only path (media off) — unchanged behavior.
+    // Data files only (media off) — one file downloads directly, several as a ZIP.
     if (!includeMedia) {
       try {
-        await exportSelectedPoints({ project, points, filename });
+        const { rootFiles } = buildExportFiles(project, points, { formats, baseName: filename, includeMedia });
+        await downloadExportFiles(rootFiles, filename);
         onClose();
       } catch (err) {
         setError(err instanceof Error ? err.message : String(err));
@@ -156,11 +168,11 @@ export function ExportPointsModal({
       return;
     }
 
-    // Media path — build the CSV once, then write the folder tree.
+    // Media path — build the data files once, then write the folder tree.
     const controller = new AbortController();
     abortRef.current = controller;
     try {
-      const csvText = buildCsvText(project, points);
+      const { layouts, rootFiles } = buildExportFiles(project, points, { formats, baseName: filename, includeMedia });
 
       if (canPickDir) {
         const rootHandle = await pickDirectory();
@@ -170,8 +182,8 @@ export function ExportPointsModal({
         }
         await exportToDirectory({
           project,
-          points,
-          csvText,
+          layouts,
+          rootFiles,
           signal: controller.signal,
           onProgress: setProgress,
           rootHandle,
@@ -180,8 +192,8 @@ export function ExportPointsModal({
         // Safari/Firefox: bundle the same tree into a ZIP download.
         await exportToZip({
           project,
-          points,
-          csvText,
+          layouts,
+          rootFiles,
           signal: controller.signal,
           onProgress: setProgress,
         });
@@ -216,11 +228,11 @@ export function ExportPointsModal({
         </div>
         <label>
           File name
-          <input value={filename} onChange={(event) => setFilename(event.target.value)} disabled={busy || includeMedia} />
+          <input value={filename} onChange={(event) => setFilename(event.target.value)} disabled={busy} />
         </label>
         {includeMedia && (
           <p className="export-help export-help-note">
-            With media on, a dated folder is created containing the CSV plus a subfolder per point with its photos and videos. The file name above applies only to the CSV-only export.
+            With media on, a dated folder is created containing the data files plus a subfolder per point (e.g. <code>1000_Water-Meter-1000</code>) with its photos and videos.
           </p>
         )}
         <div className="survey-export-facts">
@@ -230,8 +242,28 @@ export function ExportPointsModal({
           <div><span>Elevation</span><strong>{project.elevationUnits || "Not specified"}</strong></div>
         </div>
         <div className="export-columns">
-          <span className="export-columns-label">Columns</span>
-          <code>Date, Name, X (Easting), Y (Northing), Z (Elevation)</code>
+          <span className="export-columns-label">Formats</span>
+          <label className="export-media-toggle">
+            <input type="checkbox" checked={formats.csv} onChange={(event) => toggleFormat("csv", event.target.checked)} disabled={busy} />
+            <span>
+              CSV
+              <span className="export-media-meta">Date, Name, X (Easting), Y (Northing), Z (Elevation)</span>
+            </span>
+          </label>
+          <label className="export-media-toggle">
+            <input type="checkbox" checked={formats.shapefile} onChange={(event) => toggleFormat("shapefile", event.target.checked)} disabled={busy} />
+            <span>
+              Shapefile (ArcMap / ArcGIS)
+              <span className="export-media-meta">PointZ, NAD83(2011) lat/lon · Field1 point #, Field2 lat, Field3 lon, Field4 elevation, Field5 name, Northing, Easting</span>
+            </span>
+          </label>
+          <label className="export-media-toggle">
+            <input type="checkbox" checked={formats.geojson} onChange={(event) => toggleFormat("geojson", event.target.checked)} disabled={busy} />
+            <span>
+              GeoJSON
+              <span className="export-media-meta">WGS84 lat/lon with point #, name, date, description, category, elevation, northing/easting and photo list</span>
+            </span>
+          </label>
         </div>
         <label className="export-media-toggle">
           <input
@@ -272,13 +304,15 @@ export function ExportPointsModal({
           <button
             className="btn btn-primary"
             onClick={runExport}
-            disabled={busy || (!includeMedia && !filename.trim())}
+            disabled={busy || !anyFormat || !filename.trim()}
           >
             {busy
               ? "Working…"
               : includeMedia
                 ? (canPickDir ? "Export to folder" : "Export ZIP")
-                : "Export CSV"}
+                : singleFile
+                  ? (formats.csv ? "Export CSV" : "Export GeoJSON")
+                  : "Export ZIP"}
           </button>
         </div>
       </div>
