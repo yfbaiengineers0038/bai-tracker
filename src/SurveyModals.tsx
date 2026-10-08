@@ -232,7 +232,7 @@ export function ExportPointsModal({
         </label>
         {includeMedia && (
           <p className="export-help export-help-note">
-            With media on, a dated folder is created containing the data files plus a subfolder per point (e.g. <code>1000_Water-Meter-1000</code>) with its photos and videos.
+            With media on, a dated folder is created containing the data files plus a subfolder per point (e.g. <code>Water-Meter-2</code>) with its photos and videos.
           </p>
         )}
         <div className="survey-export-facts">
@@ -254,14 +254,14 @@ export function ExportPointsModal({
             <input type="checkbox" checked={formats.shapefile} onChange={(event) => toggleFormat("shapefile", event.target.checked)} disabled={busy} />
             <span>
               Shapefile (ArcMap / ArcGIS)
-              <span className="export-media-meta">PointZ, NAD83(2011) lat/lon · Field1 point #, Field2 lat, Field3 lon, Field4 elevation, Field5 name, Northing, Easting</span>
+              <span className="export-media-meta">PointZ, NAD83(2011) lat/lon · Field1 name, Field2 lat, Field3 lon, Field4 elevation, Northing, Easting</span>
             </span>
           </label>
           <label className="export-media-toggle">
             <input type="checkbox" checked={formats.geojson} onChange={(event) => toggleFormat("geojson", event.target.checked)} disabled={busy} />
             <span>
               GeoJSON
-              <span className="export-media-meta">WGS84 lat/lon with point #, name, date, description, category, elevation, northing/easting and photo list</span>
+              <span className="export-media-meta">WGS84 lat/lon with name, date, description, category, elevation, northing/easting and photo list</span>
             </span>
           </label>
         </div>

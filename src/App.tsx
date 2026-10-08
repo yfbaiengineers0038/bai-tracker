@@ -72,7 +72,6 @@ interface CreateFormData {
   time: string;
   location: string;
   description: string;
-  pointNumber: string;
   elevation: string;
 }
 
@@ -83,12 +82,11 @@ interface DetailFormData {
   lng: string;
   lat: string;
   description: string;
-  pointNumber: string;
   elevation: string;
 }
 
 const emptyDetail: DetailFormData = {
-  date: "", time: "", location: "", lng: "", lat: "", description: "", pointNumber: "", elevation: "",
+  date: "", time: "", location: "", lng: "", lat: "", description: "", elevation: "",
 };
 
 function App() {
@@ -123,7 +121,7 @@ function App() {
   // ── Create modal ──
   const [createOpen, setCreateOpen] = useState(false);
   const [createForm, setCreateForm] = useState<CreateFormData>({
-    date: "", time: "", location: "", description: "", pointNumber: "", elevation: "",
+    date: "", time: "", location: "", description: "", elevation: "",
   });
   const [createLat, setCreateLat] = useState("");
   const [createLng, setCreateLng] = useState("");
@@ -133,8 +131,7 @@ function App() {
   const createFileRef = useRef<HTMLInputElement>(null);
 
   function openCreate() {
-    const nextPointNumber = points.reduce((max, point) => Math.max(max, point.pointNumber ?? 0), 0) + 1;
-    setCreateForm({ date: nowDate(), time: nowTime(), location: "", description: "", pointNumber: String(nextPointNumber), elevation: "" });
+    setCreateForm({ date: nowDate(), time: nowTime(), location: "", description: "", elevation: "" });
     setCreateLat("");
     setCreateLng("");
     setCreateFocus(null);
@@ -157,7 +154,7 @@ function App() {
     setCreateLng(lng);
   }
 
-  /** A place picked from the Location suggestions: drop the marker there and pan the mini-map to it. */
+  /** A place picked from the Name field's suggestions: drop the marker there and pan the mini-map to it. */
   function handleCreatePlaceSelect(place: { lat: number; lng: number }) {
     setCreateLat(place.lat.toFixed(6));
     setCreateLng(place.lng.toFixed(6));
@@ -210,15 +207,6 @@ function App() {
       }
     }
 
-    const pointNumber = parseInt(createForm.pointNumber, 10);
-    if (!Number.isInteger(pointNumber) || pointNumber <= 0) {
-      alert("Enter a valid positive point number.");
-      return;
-    }
-    if (points.some((point) => point.pointNumber === pointNumber)) {
-      alert(`Point number ${pointNumber} is already used in this project.`);
-      return;
-    }
     const elevation = createForm.elevation.trim() === "" ? undefined : parseFloat(createForm.elevation);
     if (elevation !== undefined && !Number.isFinite(elevation)) {
       alert("Enter a valid elevation or leave it blank.");
@@ -232,7 +220,6 @@ function App() {
         time: createForm.time,
         location: createForm.location,
         description: createForm.description,
-        pointNumber,
         elevation,
         lat,
         lng,
@@ -325,7 +312,6 @@ function App() {
       lng: String(point.lng),
       lat: String(point.lat),
       description: point.description ?? "",
-      pointNumber: point.pointNumber == null ? "" : String(point.pointNumber),
       elevation: point.elevation == null ? "" : String(point.elevation),
     });
     setDetailPhotos((point.photos ?? []).filter((p): p is string => !!p));
@@ -428,15 +414,6 @@ function App() {
 
   async function handleApply() {
     if (!selectedId) return;
-    const pointNumber = parseInt(detail.pointNumber, 10);
-    if (!Number.isInteger(pointNumber) || pointNumber <= 0) {
-      alert("Enter a valid positive point number.");
-      return;
-    }
-    if (points.some((point) => point.id !== selectedId && point.pointNumber === pointNumber)) {
-      alert(`Point number ${pointNumber} is already used in this project.`);
-      return;
-    }
     const elevation = detail.elevation.trim() === "" ? null : parseFloat(detail.elevation);
     if (elevation !== null && !Number.isFinite(elevation)) {
       alert("Enter a valid elevation or leave it blank.");
@@ -449,7 +426,6 @@ function App() {
       time: detail.time,
       location: detail.location,
       description: detail.description,
-      pointNumber,
       elevation,
       photos: detailPhotos,
       comments: detailComments,
@@ -564,7 +540,7 @@ function App() {
           description: point.description ?? null,
           lat: point.lat,
           lng: point.lng,
-          pointNumber: point.pointNumber ?? null,
+          time: point.time ?? null,
           elevation: point.elevation ?? null,
           category: point.category ?? null,
           photoKeys: (point.photos ?? []).filter((key): key is string => !!key),
@@ -577,6 +553,18 @@ function App() {
       const next = new Set(previous);
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      return next;
+    });
+  }
+
+  /** Select every point currently shown in the list, or deselect them if all already are. */
+  function toggleShownSelection(shownIds: string[], allSelected: boolean) {
+    setSelectedPointIds((previous) => {
+      const next = new Set(previous);
+      for (const id of shownIds) {
+        if (allSelected) next.delete(id);
+        else next.add(id);
+      }
       return next;
     });
   }
@@ -642,6 +630,8 @@ function App() {
     if (sortOrder === "za") copy.sort((a, b) => (b.location ?? "").localeCompare(a.location ?? ""));
     return copy;
   }, [filteredPoints, sortOrder]);
+
+  const allShownSelected = sortedPoints.length > 0 && sortedPoints.every((p) => selectedPointIds.has(p.id));
 
   // Markers for the main map — respects the active filters (date + search).
   const pointMarkers: PointMarker[] = useMemo(
@@ -740,8 +730,14 @@ function App() {
                         style={{ background: getCategoryColor(p.category) }}
                         title={p.category || "Uncategorized"}
                       />
-                      <span className="selection-panel-name">{p.location || `Point ${p.pointNumber}`}</span>
+                      <span className="selection-panel-name">{p.location || "Unnamed point"}</span>
                       <span className="selection-panel-date">{p.date}</span>
+                      <button
+                        className="selection-panel-remove"
+                        onClick={() => togglePointSelection(p.id)}
+                        aria-label={`Remove ${p.location || "point"} from selection`}
+                        title="Remove from selection"
+                      >×</button>
                     </div>
                   ))}
               </div>
@@ -780,8 +776,8 @@ function App() {
               >
                 <option value="newest">Newest first</option>
                 <option value="oldest">Oldest first</option>
-                <option value="az">Location A–Z</option>
-                <option value="za">Location Z–A</option>
+                <option value="az">Name A–Z</option>
+                <option value="za">Name Z–A</option>
               </select>
               <button className="btn btn-primary btn-create" onClick={openCreate}>
                 + Create Point
@@ -891,12 +887,28 @@ function App() {
           ) : sortedPoints.length === 0 ? (
             <p className="empty">{points.length === 0 ? "No points yet. Create one above." : "No points match your search."}</p>
           ) : (
+            <>
+            <label className="select-shown">
+              <input
+                type="checkbox"
+                checked={allShownSelected}
+                onChange={() => toggleShownSelection(sortedPoints.map((p) => p.id), allShownSelected)}
+              />
+              Select all {sortedPoints.length} shown for export
+            </label>
             <div className="point-grid">
               {sortedPoints.map((p) => (
                 <div key={p.id} className={selectedPointIds.has(p.id) ? "point-card point-card-selected" : "point-card"} style={{ borderLeft: `4px solid ${selectedPointIds.has(p.id) ? "#22c55e" : getCategoryColor(p.category)}` }}>
                   <div className="point-card-header">
-                    <span className="point-number">{p.pointNumber == null ? "No point #" : `Point ${p.pointNumber}`}</span>
-                    <span className="point-date">{p.date}</span>
+                    <label className="point-select" title="Select for export">
+                      <input
+                        type="checkbox"
+                        checked={selectedPointIds.has(p.id)}
+                        onChange={() => togglePointSelection(p.id)}
+                        aria-label={`Select ${p.location || "point"} for export`}
+                      />
+                      <span className="point-date">{p.date}</span>
+                    </label>
                     <span className="point-time">{formatTimeDisplay(p.date, p.time ?? "", p.timezone)}</span>
                   </div>
                   <h3>{p.location}</h3>
@@ -915,6 +927,7 @@ function App() {
                 </div>
               ))}
             </div>
+            </>
           )}
         </section>
       </main>
@@ -960,37 +973,23 @@ function App() {
                 </label>
               </div>
 
-              <div className="create-row">
-                <label>
-                  Point number
-                  <input
-                    name="pointNumber"
-                    type="number"
-                    min="1"
-                    step="1"
-                    value={createForm.pointNumber}
-                    onChange={handleCreateChange}
-                    required
-                  />
-                </label>
-                <label>
-                  Elevation (optional)
-                  <input
-                    name="elevation"
-                    type="number"
-                    step="any"
-                    value={createForm.elevation}
-                    onChange={handleCreateChange}
-                    placeholder="Unknown"
-                  />
-                </label>
-              </div>
+              <label>
+                Elevation (optional)
+                <input
+                  name="elevation"
+                  type="number"
+                  step="any"
+                  value={createForm.elevation}
+                  onChange={handleCreateChange}
+                  placeholder="Unknown"
+                />
+              </label>
 
               <label>
-                Location
+                Name
                 <PlaceAutocompleteInput
                   name="location"
-                  placeholder="e.g. Central Park, NYC"
+                  placeholder="e.g. Water Meter"
                   value={createForm.location}
                   required
                   disabled={createBusy}
@@ -1129,19 +1128,13 @@ function App() {
               <input name="time" type="time" value={detail.time} onChange={handleDetailChange} />
             </label>
 
-            <div className="detail-survey-row">
-              <label>
-                Point number
-                <input name="pointNumber" type="number" min="1" step="1" value={detail.pointNumber} onChange={handleDetailChange} />
-              </label>
-              <label>
-                Elevation (optional)
-                <input name="elevation" type="number" step="any" value={detail.elevation} onChange={handleDetailChange} placeholder="Unknown" />
-              </label>
-            </div>
+            <label>
+              Elevation (optional)
+              <input name="elevation" type="number" step="any" value={detail.elevation} onChange={handleDetailChange} placeholder="Unknown" />
+            </label>
 
             <label>
-              Location
+              Name
               <input name="location" type="text" value={detail.location} onChange={handleDetailChange} />
             </label>
 

@@ -144,7 +144,7 @@ export function buildExportFiles(
   const layouts = buildPointLayouts(points);
   const rootFiles: RootFile[] = [];
   if (formats.csv) {
-    rootFiles.push({ name: `${base}.csv`, data: new Blob([buildCsvText(project, points)], { type: "text/csv;charset=utf-8" }) });
+    rootFiles.push({ name: `${base}.csv`, data: new Blob([buildCsvText(project, points, layouts.map((l) => l.name))], { type: "text/csv;charset=utf-8" }) });
   }
   if (formats.shapefile) {
     const shape = buildShapefile(project, layouts);

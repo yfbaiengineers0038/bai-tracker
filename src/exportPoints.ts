@@ -3,11 +3,11 @@ import { projectCoordinate } from "./survey";
 export interface ExportPoint {
   id: string;
   date: string;
+  time?: string | null;
   location?: string | null;
   description?: string | null;
   lat: number;
   lng: number;
-  pointNumber?: number | null;
   elevation?: number | null;
   category?: string | null;
   /** S3 keys for this point's photos/videos (e.g. point-photos/<id>/<file>). */
@@ -62,17 +62,18 @@ export function downloadBlob(blob: Blob, filename: string) {
  *   Date, Name, X (Easting), Y (Northing), Z (Elevation)
  *
  * Exposed so the media export can write the same CSV into a folder or ZIP
- * without re-implementing the column logic.
+ * without re-implementing the column logic. `names` overrides each point's
+ * name with its unique export name, so the CSV matches the shapefile/GeoJSON.
  */
-export function buildCsvText(project: ExportProject, points: ExportPoint[]): string {
+export function buildCsvText(project: ExportProject, points: ExportPoint[], names?: string[]): string {
   if (!project.coordinateSystemEpsg) throw new Error("The project coordinate system is not configured.");
   if (points.length === 0) throw new Error("Select at least one point.");
 
   const rows = ["Date,Name,X,Y,Z"];
-  for (const point of points) {
+  points.forEach((point, index) => {
     const { easting, northing } = projectCoordinate(point.lat, point.lng, project.coordinateSystemEpsg!);
     const z = point.elevation ?? 0;
-    const name = point.location ?? (point.pointNumber != null ? `Point ${point.pointNumber}` : "");
+    const name = names?.[index] ?? point.location ?? "";
     rows.push([
       csvTextCell(point.date),
       csvCell(name),
@@ -80,7 +81,7 @@ export function buildCsvText(project: ExportProject, points: ExportPoint[]): str
       northing.toFixed(3),
       z.toFixed(3),
     ].join(","));
-  }
+  });
   // UTF-8 BOM so Excel reads the file correctly; CRLF line terminators.
   return `\uFEFF${rows.join("\r\n")}\r\n`;
 }

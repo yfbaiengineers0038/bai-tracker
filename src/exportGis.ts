@@ -7,11 +7,11 @@ import type { ExportPoint, ExportProject } from "./exportPoints";
 
 export interface PointLayout {
   point: ExportPoint;
-  /** Export name: spaces → hyphens, point number appended when not unique. */
+  /** Unique export name: spaces → hyphens, counter appended when repeated. */
   name: string;
-  /** Per-point media folder: `1000_Water-Meter-1000`. */
+  /** Per-point media folder, same as `name`: `Water-Meter-2`. */
   folder: string;
-  /** Media files in the folder: `1000_Water-Meter-1000_1.jpg`, … */
+  /** Media files in the folder: `Water-Meter-2_1.jpg`, … */
   files: { key: string; name: string }[];
 }
 
@@ -31,31 +31,48 @@ function extensionOf(key: string) {
 }
 
 /**
- * Names follow the survey processing convention:
- *   "Point 57" (unique)        → Point-57
- *   "Water Meter" (repeated)   → Water-Meter-1000   (point number appended)
- *   no name                    → Point-1004
+ * The name is the join key between the shapefile and the GeoJSON, so every
+ * point gets a unique one:
+ *   "Point 57" (unique)          → Point-57
+ *   "Water Meter" (×3)           → Water-Meter-1, Water-Meter-2, Water-Meter-3
+ *   no name                      → Point (or Point-1, Point-2, … when several)
+ * Repeats are numbered oldest first by date and time, so re-exporting the same
+ * selection gives the same names.
  */
 export function buildPointLayouts(points: ExportPoint[]): PointLayout[] {
-  const bases = points.map((p) => slug(p.location ?? ""));
+  const bases = points.map((p) => slug(p.location ?? "") || "Point");
   const counts = new Map<string, number>();
   for (const base of bases) counts.set(base.toLowerCase(), (counts.get(base.toLowerCase()) ?? 0) + 1);
 
-  const used = new Set<string>();
-  return points.map((point, index) => {
-    const base = bases[index] || "Point";
-    const suffix = point.pointNumber != null ? String(point.pointNumber) : String(index + 1);
-    let name = !bases[index] || (counts.get(base.toLowerCase()) ?? 0) > 1 ? `${base}-${suffix}` : base;
-    // Defensive: "Point-5" typed by hand can still collide with a generated name.
-    for (let n = 2; used.has(name.toLowerCase()); n++) name = `${base}-${suffix}-${n}`;
-    used.add(name.toLowerCase());
+  const chronological = points
+    .map((point, index) => ({ index, when: `${point.date} ${point.time ?? ""}` }))
+    .sort((a, b) => a.when.localeCompare(b.when) || a.index - b.index);
 
-    const folder = point.pointNumber != null ? `${point.pointNumber}_${name}` : name;
+  const names: string[] = new Array(points.length);
+  const seen = new Map<string, number>();
+  const used = new Set<string>();
+  for (const { index } of chronological) {
+    const base = bases[index];
+    const key = base.toLowerCase();
+    let name = base;
+    if ((counts.get(key) ?? 0) > 1) {
+      const k = (seen.get(key) ?? 0) + 1;
+      seen.set(key, k);
+      name = `${base}-${k}`;
+    }
+    // Defensive: a typed "Water-Meter-2" can collide with a generated one.
+    for (let n = 2; used.has(name.toLowerCase()); n++) name = `${base}-${n}`;
+    used.add(name.toLowerCase());
+    names[index] = name;
+  }
+
+  return points.map((point, index) => {
+    const name = names[index];
     const files = (point.photoKeys ?? []).filter(Boolean).map((key, i) => ({
       key,
-      name: `${folder}_${i + 1}${extensionOf(key)}`,
+      name: `${name}_${i + 1}${extensionOf(key)}`,
     }));
-    return { point, name, folder, files };
+    return { point, name, folder: name, files };
   });
 }
 
@@ -91,10 +108,9 @@ export function buildGeoJson(
     return {
       type: "Feature",
       properties: {
-        PointNumber: point.pointNumber ?? null,
         Name: pointName,
-        OriginalName: point.location ?? null,
-        Date: /^\d{4}-\d{2}-\d{2}$/.test(point.date) ? `${point.date}T00:00:00` : point.date,
+        OriginalName: point.location || null,
+        Date: isoDateTime(point.date, point.time),
         ConditionDescription: point.description || null,
         UtilityType: point.category || null,
         LATITUDE: point.lat,
@@ -122,6 +138,13 @@ export function buildGeoJson(
   );
 }
 
+/** `2026-07-13` + `15:31` → `2026-07-13T15:31:00`; no time → midnight. */
+function isoDateTime(date: string, time: string | null | undefined) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return date;
+  const hm = /^\d{2}:\d{2}(:\d{2})?$/.test(time ?? "") ? time! : "00:00";
+  return `${date}T${hm.length === 5 ? `${hm}:00` : hm}`;
+}
+
 function round(value: number, digits: number) {
   const f = 10 ** digits;
   return Math.round(value * f) / f;
@@ -144,11 +167,10 @@ interface DbfField {
 }
 
 const DBF_FIELDS: DbfField[] = [
-  { name: "Field1", type: "N", length: 10, decimals: 0 },   // point number
+  { name: "Field1", type: "C", length: 254, decimals: 0 },  // name (join key to the GeoJSON's Name)
   { name: "Field2", type: "N", length: 19, decimals: 11 },  // latitude
   { name: "Field3", type: "N", length: 19, decimals: 11 },  // longitude
   { name: "Field4", type: "N", length: 19, decimals: 11 },  // elevation (also Z)
-  { name: "Field5", type: "C", length: 254, decimals: 0 },  // name
   { name: "Northing", type: "N", length: 19, decimals: 3 },
   { name: "Easting", type: "N", length: 19, decimals: 3 },
 ];
@@ -197,7 +219,7 @@ export function buildShapefile(project: ExportProject, layouts: PointLayout[]): 
 
   const rows = layouts.map(({ point, name }) => {
     const { easting, northing } = projectCoordinate(point.lat, point.lng, epsg);
-    return [point.pointNumber ?? null, point.lat, point.lng, point.elevation ?? null, name, northing, easting];
+    return [name, point.lat, point.lng, point.elevation ?? null, northing, easting];
   });
 
   return {

@@ -315,6 +315,21 @@
   color: #94a3b8;
 }
 
+.selection-panel-remove {
+  flex: 0 0 auto;
+  border: none;
+  background: none;
+  color: #94a3b8;
+  font-size: 1rem;
+  line-height: 1;
+  padding: 0 0.15rem;
+  cursor: pointer;
+}
+
+.selection-panel-remove:hover {
+  color: #b91c1c;
+}
+
 .selection-panel-footer {
   padding: 0.6rem 0.75rem;
   border-top: 1px solid #e5e7eb;
@@ -529,13 +544,39 @@
   gap: 0.5rem;
 }
 
-.point-number {
-  color: #334155;
-  font-weight: 600;
-}
-
 .point-date {
   white-space: nowrap;
+}
+
+/* Per-card export checkbox, sharing the header row with the date. */
+.point-select {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  cursor: pointer;
+}
+
+.point-select input {
+  margin: 0;
+  accent-color: #22c55e;
+  cursor: pointer;
+}
+
+/* "Select all shown" row above the point grid. */
+.select-shown {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+  color: #475569;
+  cursor: pointer;
+}
+
+.select-shown input {
+  margin: 0;
+  accent-color: #22c55e;
+  cursor: pointer;
 }
 
 .point-time {
@@ -662,15 +703,8 @@
   box-shadow: 0 0 0 3px rgba(142, 26, 142, 0.15);
 }
 
-.detail-survey-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 0.75rem;
-}
-
 @media (max-width: 600px) {
   .coordinate-warning { align-items: flex-start; flex-direction: column; }
-  .detail-survey-row { grid-template-columns: 1fr; }
   .selection-panel { width: calc(100% - 20px); max-height: 45%; }
 }
 
